@@ -1,0 +1,13 @@
+executable:
+test-cases:
+    standard:
+        executable:
+        returncode:
+        argv: []
+        stdin: |
+        stdout: |
+        stderr: |
+        ofstreams:
+            - base-file:
+              test-file:
+        extra-tests: []
