@@ -1,6 +1,8 @@
 executable:
 test-cases:
     standard:
+        scrub-env:
+        env:
         executable:
         returncode:
         argv: []

@@ -1,78 +1,22 @@
 import argparse
-import importlib.util
-import logging
 import os
-import re
 import shutil
 import sys
 import threading
 import yaml
 from collections import OrderedDict
 from subprocess import Popen, PIPE
+from contestgen import __version__
+from contestgen.utilities import configure_yaml  # noqa: F401
+from contestgen.utilities.logger import logger, logger_format_fields, setup_logger
+# PyYAML 3.12 compatibility
+try:
+    from yaml import FullLoader as DefaultLoader
+except ImportError:
+    from yaml import Loader as DefaultLoader
 
 
-__version__ = '0.1.0'
-logger = logging.getLogger(__name__)
-logger_format_fields = {
-    'test_case': __file__
-}
-
-
-def setup_logger(is_verbose):
-    """
-    Configure the logger for contest.py
-
-    :param level: logging level
-    :return:
-    """
-    verbosity_mapping = {
-        False: logging.CRITICAL,
-        True: logging.DEBUG
-    }
-
-    level = verbosity_mapping[is_verbose]
-
-    class Formatter(logging.Formatter):
-        def format(self, record):
-            """
-            Format the message conditionally
-
-            :param record: incoming message information
-            :return: updated message information
-            """
-            if record.levelno == logging.DEBUG:
-                s = '%(message)s'
-            else:
-                s = '%(test_case)s - %(message)s'
-            self._style._fmt = s
-            s = logging.Formatter.format(self, record)
-            return s
-
-    global logger
-    logger.setLevel(level)
-    ch = logging.StreamHandler()
-    ch.setLevel(level)
-    formatter = Formatter()
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)  # pylint: disable=E1101
-    logger = logging.LoggerAdapter(logger, logger_format_fields)
-
-
-# https://stackoverflow.com/a/21912744
-def ordered_load(stream, Loader=yaml.Loader, object_pairs_hook=OrderedDict):
-    class OrderedLoader(Loader):
-        pass
-
-    def construct_mapping(loader, node):
-        loader.flatten_mapping(node)
-        return object_pairs_hook(loader.construct_pairs(node))
-    OrderedLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-        construct_mapping)
-    return yaml.load(stream, OrderedLoader)
-
-
-def record_test(command, test_name):
+def record_test(configuration, test_name, command):
     """
     Record the input and output of the given command, placing it within a a
     test recipe
@@ -164,21 +108,21 @@ def record_test(command, test_name):
 
     new_files = set(get_files('.')) - files
 
-    if os.path.exists('contest_recipe.yaml'):
-        with open('contest_recipe.yaml', 'r') as recipe:
-            test_recipe = ordered_load(recipe, yaml.SafeLoader)
-        if test_name in test_recipe['test-cases']:
+    if os.path.exists(configuration):
+        with open(configuration, 'r') as recipe:
+            test_matrix = yaml.load(open(configuration, 'r'), Loader=DefaultLoader)
+        if test_name in test_matrix['test-cases']:
             return '{} is already a test case! Choose a new name!'.format(test_name)
-        test_recipe['test-cases'][test_name] = OrderedDict()
-        test_case = test_recipe['test-cases'][test_name]
-        if command[0] != test_recipe['executable']:
+        test_matrix['test-cases'][test_name] = OrderedDict()
+        test_case = test_matrix['test-cases'][test_name]
+        if command[0] != test_matrix['executable']:
             test_case['executable'] = command[0]
     else:
-        test_recipe = OrderedDict()
-        test_recipe['executable'] = command[0]
-        test_recipe['test-cases'] = OrderedDict()
-        test_recipe['test-cases'][test_name] = OrderedDict()
-        test_case = test_recipe['test-cases'][test_name]
+        test_matrix = OrderedDict()
+        test_matrix['executable'] = command[0]
+        test_matrix['test-cases'] = OrderedDict()
+        test_matrix['test-cases'][test_name] = OrderedDict()
+        test_case = test_matrix['test-cases'][test_name]
 
     test_case['return-code'] = proc.returncode
 
@@ -186,7 +130,7 @@ def record_test(command, test_name):
     if argv:
         test_case['argv'] = command[1:]
     if recorder_pipe.lines:
-        test_case['stdin'] = recorder_pipe.lines
+        test_case['stdin'] = '\n'.join(recorder_pipe.lines)
     if stdout:
         test_case['stdout'] = stdout
     if stderr:
@@ -202,8 +146,8 @@ def record_test(command, test_name):
             test_case['ofstreams'][-1]['base-file'] = base_file
             test_case['ofstreams'][-1]['test-file'] = new_file
 
-    recipe = open('contest_recipe.yaml', 'w')
-    yaml.dump(test_recipe, recipe)
+    recipe = open(configuration, 'w')
+    yaml.dump(test_matrix, recipe)
     return 0
 
 
@@ -211,21 +155,15 @@ def test():
     """Run the specified test configuration"""
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument('configuration', help='path to a YAML test configuration file')
-    parser.add_argument('--filters', default=[], nargs='+', help='regex pattern for tests to match')    
-    parser.add_argument('--exclude-filters', default=[], nargs='+', help='regex pattern for tests to match')    
-    parser.add_argument('--generate', nargs='+', help='executable and arguments to generate a test for')    
-    parser.add_argument('--new-test-name', help='name for the test being generated; name must be unused already')    
+    parser.add_argument('test_name', help='name for the test being generated; name must be unused already')
+    parser.add_argument('generate', nargs='+', help='executable and arguments to generate a test for')
     parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
-    parser.add_argument('--version', action='version', version='contest.py v{}'.format(__version__))
+    parser.add_argument('--version', action='version', version='contest.py v{}'.format(__version__.__version__))
     inputs = parser.parse_args()
 
     setup_logger(inputs.verbose)
 
-    if inputs.generate:
-        if not inputs.new_test_name:
-            return 'You must specify --new-test-name <name> when generating a new test!'
-
-        return record_test(inputs.generate, inputs.new_test_name)
+    return record_test(inputs.configuration, inputs.test_name, inputs.generate)
 
 
 if __name__ == '__main__':

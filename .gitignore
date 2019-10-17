@@ -1,0 +1,8 @@
+*.exe
+*.obj
+*.o
+*.pyc
+.vscode
+build/**
+dist/**
+contest_gen.egg-info/**

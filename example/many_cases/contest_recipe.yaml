@@ -1,0 +1,12 @@
+executable: printnum.exe
+test-cases:
+  one:
+    return-code: 0
+    stdin: '1'
+    stdout: |
+      1
+  two:
+    return-code: 0
+    stdin: '2'
+    stdout: |
+      2
